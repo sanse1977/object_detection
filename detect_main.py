@@ -22,9 +22,9 @@ class XiaoAll(QMainWindow, Ui_MainWindow):
     def __init__(self, parent=None):
         super(XiaoAll, self).__init__(parent)
         self.setupUi(self)
-        self.textBrowser.append('系统启动中....')
+        # self.textBrowser.append('系统启动中....')
         self.i = 0
-        self.imgLabel.setText('当前检测为空')
+        self.imgLabel.setText(' 当前无异常')
         self.cap = None
         self.frame = None
         self.res1 = False
@@ -48,26 +48,26 @@ class XiaoAll(QMainWindow, Ui_MainWindow):
         self.ndarrayright = self.loadRoiImage('img/rightImg.pkl')
         self.ndarraymiddle = self.loadRoiImage('img/middleImg.pkl')
         self.flagStop = False
-        self.stopBtn.clicked.connect(self.stop)
-        self.startBtn.clicked.connect(self.start)
+        self.client = Client("ocp.tcp://10.19.3.35:49320")
+        self.node_info = "ns=2;s=xinsawaninihoudaoxianti.QCPU.光栅触发暂停标志"
+        self.isStopFlag = True
+        self.node = None
+        self.threadFlag = 1
+        # self.stopBtn.clicked.connect(self.stop)
+        # self.startBtn.clicked.connect(self.start)
         gray = cv2.cvtColor(self.mask1, cv2.COLOR_BGR2GRAY)
         binary = cv2.threshold(gray, 55, 255, cv2.THRESH_BINARY)[1]
         self.contours = cv2.findContours(binary.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)[1]
-        self.client = Client("ocp.tcp://10.19.3.35:49320")
-        self.connect()
-        self.node_info = "ns=2;s=xinsawaninihoudaoxianti.QCPU.光栅触发暂停标志"
-        self.node = self.client.get_node(self.node_info)
-        self.isStopFlag = self.node.get_value()
         self.count00 = 0
         self.thread_video_receive = threading.Thread(target=self.video_receive_rstp)  # 该线程用来读取视频流
         # self.thread_video_receive = threading.Thread(target=self.video_receive_local)  # 该线程用来读取视频流
         self.thread_video_receive.start()
 
-        self.thread_time = Timer('updatePlay', sleep_time=0.04)  # 该线程用来每隔0.04秒在label上绘图
+        self.thread_time = Timer('updatePlay', sleep_time=0.07)  # 该线程用来每隔0.04秒在label上绘图
         self.thread_time.updateTime.connect(self.video_play)
         self.thread_time.start()
 
-        self.thread_video_deal = Timer('drawVideo', sleep_time=0.06)  # 该线程用来处理视频
+        self.thread_video_deal = Timer('drawVideo', sleep_time=0.04)  # 该线程用来处理视频
         self.thread_video_deal.updateTime.connect(self.deal_frame)
         self.thread_video_deal.start()
 
@@ -75,10 +75,16 @@ class XiaoAll(QMainWindow, Ui_MainWindow):
         # self.thread_video_diff.updateTime.connect(self.frameDelta)
         # self.thread_video_diff.start()
 
-        self.thread_video_stop = Timer('stopFlag', sleep_time=2)
+        self.thread_video_stop = Timer('stopFlag', sleep_time=3)
         self.thread_video_stop.updateTime.connect(self.detect_isStopFlag)  # 读取机器是否停机信号
         self.thread_video_stop.start()
-        self.textBrowser.append('系统已经启动！！！！')
+        # self.textBrowser.append('系统已经启动！！！！')
+
+        self.thread_opc_stop = Timer('stopOpc', sleep_time=180)
+        self.thread_opc_stop.updateTime.connect(self.connect)
+        self.thread_opc_stop.start()
+
+
 
     def stop(self):
 
@@ -133,10 +139,34 @@ class XiaoAll(QMainWindow, Ui_MainWindow):
     def connect(self):
         try:
             self.client.connect()
+            self.node = self.client.get_node(self.node_info)
+            # self.isStopFlag = self.node.get_value()
         except Exception as e:
-            self.thread_video_stop.stop_thread()
-            self.isStopFlag = True
-            print(e)
+            self.textBrowser.append('opc断开连接,正在尝试连接！')
+            # self.isStopFlag = True
+
+        # try:
+            # self.count = 1
+        # except Exception as e:
+        #     self.flagStop = True
+        #     print(e)
+            # self.thread_opc_stop.start()
+            # self.thread_video_stop.stop_thread()
+            # self.stop_machine()
+            # self.count00 = 0
+
+
+    def reconnect(self):
+        try:
+            self.client.connect()
+            self.textBrowser.append('重新连接成功!')
+            self.stop_thread(self.thread_opc_stop)
+            # self.count = 1
+        except Exception as e:
+            self.textBrowser.append('opc断开连接,正在尝试连接！')
+            # self.thread_video_stop.stop_thread()
+            # self.stop_machine()
+            # self.count00 = 0
 
 
     def stop_machine(self):
@@ -159,8 +189,13 @@ class XiaoAll(QMainWindow, Ui_MainWindow):
             self.count00 = 1
             # self.res1 = False
             # self.thread_video_diff.resume()
-
-        self.isStopFlag = self.node.get_value()
+        try:
+            self.isStopFlag = self.node.get_value()
+            if self.threadFlag == 1:
+                self.textBrowser.append('opc连接成功！')
+                self.threadFlag = 0
+        except Exception as e:
+            self.isStopFlag = True
 
     def deal_frame(self):
 
@@ -177,10 +212,15 @@ class XiaoAll(QMainWindow, Ui_MainWindow):
 
                 self.video_recog()
 
-            if self.isStopFlag is False and self.result is True:
-                self.stop_machine()
-                self.count00 = 0
-                # self.count = self.count % 10
+            # if self.isStopFlag is False and self.result is True:
+            #     self.stop_machine()
+            #     self.count00 = 0
+            #     # self.count = self.count % 10
+
+            # if self.result:
+            #     self.save_img(self.frame)
+            # else:
+            #     self.text = 'No Person!!!'
 
             # time.sleep(20)
             # self.node.set_attribute(ua.AttributeIds.Value, ua.DataValue(variant=ua.Variant(False)))
@@ -201,12 +241,19 @@ class XiaoAll(QMainWindow, Ui_MainWindow):
         :param cam: 摄像头数据源
         :return: None
         '''
+
         self.cap = cv2.VideoCapture(cam)
+        if self.cap.isOpened() is False:
+            self.stop_machine()
+            self.textBrowser.append('摄像头连接不上,请检查网络摄像头后重新启动系统!')
+            f1 = open('time.txt', 'w')
+            currenttime = datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+            f1.writelines(currenttime+'摄像头连接不上!')
+            self.cap = cv2.VideoCapture(cam)
+            f1.close()
+
         ret, frame = self.cap.read()
-        # if self.count2 == 0:
-        #     self.textBrowser.append('系统已经启动！！！')
-        #     self.count2 += 1
-        while True:
+        while self.cap.isOpened():
             self.frame = frame
 
             while ret is False:
@@ -219,6 +266,11 @@ class XiaoAll(QMainWindow, Ui_MainWindow):
                 time.sleep(0.01)
             # if cv2.waitKey(1) & 0xFF == ord('q'):
             #     break
+
+        # if self.count2 == 0:
+        #     self.textBrowser.append('系统已经启动！！！')
+        #     self.count2 += 1
+
 
     def video_receive_rstp(self, cam='rtsp://user:xiolift123@10.19.31.154:554/ch2'):
         '''该方法用来接收网络视频
@@ -236,13 +288,15 @@ class XiaoAll(QMainWindow, Ui_MainWindow):
         frame = self.frame  # 原始彩色图，摄像头
 
         # Xentire = self.imgProcess(frame, (260, 612, 470, 1110), (3, 3), self.ndarray, 10)
-        Xleft = self.imgProcess(frame, (420, 612, 470, 570), (3, 3), self.ndarrayleft, 13)
-        Xright = self.imgProcess(frame, (260, 340, 1010, 1110), (3, 3), self.ndarrayright, 15)
-        Xmiddle = self.imgProcess(frame, (310, 400, 550, 650), (3, 3), self.ndarraymiddle, 16)
+        Xleft = self.imgProcess(frame, (420, 612, 470, 570), (3, 3), self.ndarrayleft, 11)
+        Xright = self.imgProcess(frame, (260, 340, 1010, 1110), (3, 3), self.ndarrayright, 14)
+        Xmiddle = self.imgProcess(frame, (310, 400, 550, 650), (3, 3), self.ndarraymiddle, 15)
 
         self.frameDelta()
         self.result = self.detect_person(Xleft, Xright, Xmiddle)
-        if self.result:
+        if self.isStopFlag is False and self.result is True:
+            self.stop_machine()
+            self.count00 = 0
             self.save_img(frame)
         else:
             self.text = 'No Person!!!'
@@ -281,11 +335,11 @@ class XiaoAll(QMainWindow, Ui_MainWindow):
                 cv2.putText(self.frame, "Room Status: {}".format(self.text), (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 2,
                             (0, 0, 255), 2)
 
-            cv2.rectangle(self.frame, (450, 240), (1130, 632), (0, 255, 0), 6)
-            # cv2.rectangle(self.frame, (450, 400), (590, 632), (255, 0, 0), 3)
-            # cv2.rectangle(self.frame, (990, 240), (1130, 360), (255, 0, 0), 3)
-            # cv2.rectangle(self.frame, (540, 300), (660, 400), (255, 0, 255), 3)
-            cv2.rectangle(self.frame, (400, 900), (1550, 1080), (0, 255, 0), 6)
+            cv2.rectangle(self.frame, (450, 240), (1130, 632), (0, 255, 0), 10)
+            cv2.rectangle(self.frame, (230, 300), (440, 740), (255, 0, 0), 10)
+            cv2.rectangle(self.frame, (580, 100), (1110, 230), (255, 0, 0), 10)
+            cv2.rectangle(self.frame, (1140, 200), (1300, 600), (255, 0, 0), 10)
+            cv2.rectangle(self.frame, (400, 900), (1550, 1080), (0, 255, 0), 10)
             for c in self.contours:
                 cv2.drawContours(self.frame, c, -1, (0, 255, 0), 6)
 
@@ -354,14 +408,14 @@ class XiaoAll(QMainWindow, Ui_MainWindow):
 
         # print('Xleft:', Xleft, 'Xright:', Xright, 'Xmiddle:', Xmiddle, 'res1:', self.res1, 'res2:', self.res2)
 
-        if Xleft > 13:
+        if Xleft > 11:
             self.textBrowser.append('左边有人！')
             return True
             # print('minleft:', minleft, 'minright:', minright, 'minmiddle:', minmiddle, 'minentire:', minentire)
-        elif Xright > 15:
+        elif Xright > 14:
             self.textBrowser.append('右边有人！')
             return True
-        elif Xmiddle > 16:
+        elif Xmiddle > 15:
             self.textBrowser.append('中间有人！')
             return True
         # elif Xentire > 10:
@@ -514,12 +568,9 @@ if __name__ == '__main__':
     main_app = XiaoAll()
     app.setQuitOnLastWindowClosed(True)
     qssStyle = '''
-            QPushButton {
-                background-color: #009ACD
-            }
             
             QMainWindow {
-                background-color: #36648B
+                background-color: black
             }
             
             QTextBrowser {
